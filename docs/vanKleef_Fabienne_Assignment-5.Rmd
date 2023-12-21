@@ -1,0 +1,575 @@
+---
+title: "Dimension Reduction"
+author: "Fabienne van Kleef"
+date: "2023-12-06"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Introduction
+
+### Background
+
+Heart failure, a complex clinical syndrome, is characterized by diverse pathophysiological mechanisms and varied clinical presentations. Understanding the intricate relationships between various clinical factors and their impact on heart failure outcomes is critical for advancing patient care and treatment strategies.
+
+### Aim of the Assignment
+
+This programming assignment aims to delve into the multifaceted nature of heart failure by employing statistical and network analysis techniques on a comprehensive dataset of clinical records. The primary objectives are to:
+
+Identify Key Variables: Employ dimension reduction techniques, specifically Principal Component Analysis (PCA), to distill the essential variables that capture the majority of the variance in the dataset. This helps in simplifying the complex data into more manageable and interpretable components.
+Explore Multicollinearity: Examine the correlations among variables to identify multicollinearity, which can influence the effectiveness of predictive models.
+Assess Data Suitability: Utilize the Kaiser-Meyer-Olkin (KMO) measure and Bartlett’s test to evaluate the appropriateness of the dataset for factor analysis.
+Visualize Data Relationships: Create visual representations of the data, including heatmaps of correlations and biplots of PCA, to gain insights into the relationships between different clinical factors.
+Network Analysis: Apply Exploratory Graph Analysis (EGA) using the graphical LASSO (glasso) model and the walktrap algorithm for community detection. This approach aims to uncover the underlying structure and communities within the dataset, offering a novel perspective on how variables interact within the network.
+Predictive Modeling: Develop a logistic regression model to predict patient outcomes, specifically focusing on the death event as a result of heart failure. The model's performance will be evaluated through confusion matrices.
+Research Significance
+
+## Load Data & Data wrangling 
+```{r}
+
+#Load data 
+heart_failure_data<-read.csv("/Users/fab/Downloads/Assignment5DS/heart_failure_clinical_records_dataset.csv")
+
+#Load packages
+library(tidyverse);library(ggplot2);library(psych);
+
+heart_failure_complete <- heart_failure_data %>% 
+  dplyr::select(age, anaemia, creatinine_phosphokinase, diabetes, ejection_fraction,
+         high_blood_pressure, platelets, serum_creatinine, serum_sodium, sex,
+         smoking, time, DEATH_EVENT)
+
+
+heart_failure_complete <- na.omit(heart_failure_complete)
+
+head(heart_failure_complete)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+
+
+## Visualization of Correlation Matrix in Heart Failure Clinical Data 
+
+In our quest to unravel the complex relationships between various clinical variables in heart failure, visualizing the correlation matrix is a pivotal step. This heatmap provides an intuitive graphical representation of how different clinical factors are interrelated. By observing the strength and direction of correlations, we can identify patterns and potential multicollinearity among variables. Such insights are invaluable in refining our predictive models and ensuring their robustness.
+
+```{r}
+
+setup_ggplot2_heatmap <- function(correlation_matrix, type = "full") {
+    # Convert correlation matrix to long format
+    correlation_data <- as.data.frame(as.table(correlation_matrix))
+
+    # Rename columns for clarity
+    colnames(correlation_data) <- c("Variable1", "Variable2", "Correlation")
+
+    # Filter for lower or upper matrix if needed
+    if (type == "lower") {
+        correlation_data <- correlation_data[correlation_data$Variable1 > correlation_data$Variable2, ]
+    } else if (type == "upper") {
+        correlation_data <- correlation_data[correlation_data$Variable1 < correlation_data$Variable2, ]
+    }
+
+    # Create heatmap
+    ggplot(correlation_data, aes(Variable2, Variable1, fill = Correlation)) +
+        geom_tile() +
+        scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0) +
+        theme_minimal() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+        labs(fill = "Correlation")
+}
+
+# Compute correlation matrix
+cor_matrix <- cor(heart_failure_complete)
+
+# Obtain full matrix
+heart_failure_heatmap <- setup_ggplot2_heatmap(cor_matrix, type = "full")
+
+# Print the heatmap
+print(heart_failure_heatmap)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+Squares that are red indicate variables that have a positive correlation, meaning as one variable increases, the other tends to increase as well. For example, the square at the intersection of time and DEATH_EVENT is red, suggesting that longer times are associated with an increase in death events, or conversely, that surviving patients tend to have longer follow-up times.
+Blue squares indicate a negative correlation, meaning as one variable increases, the other tends to decrease. For instance, if ejection_fraction and DEATH_EVENT show a blue square, it would suggest that higher ejection fraction values (a measure of heart function) are associated with a decrease in the occurrence of death events.
+White or light-colored squares suggest little to no linear relationship between the variables.
+The diagonal from the top left to the bottom right, which is uniformly red, represents the correlation of each variable with itself, which is always +1
+If any off-diagonal squares are very dark red or blue, it would indicate potential multicollinearity between those variables, which could affect the performance of predictive models that assume independence between predictors.There is no squares that are super dark, therefore we assume there is no multicollinearity. 
+ Correlations between clinical variables and DEATH_EVENT are of particular interest as they could indicate potential risk factors for mortality in heart failure patients. 
+
+## Check for multicollinearity (r>0.90)
+
+To ensure the robustness of our analyses and the validity of any conclusions drawn from regression modeling, it is imperative to identify and address multicollinearity. This code snippet is dedicated to detecting multicollinearity within the heart failure clinical records dataset. By establishing a threshold for correlation (r > 0.90), we can pinpoint variables that are potentially redundant or that provide overlapping information. 
+```{r}
+
+# Obtain correlations
+correlations <- cor(heart_failure_complete)
+
+# Determine which variables have correlations greater than or equal to 0.90
+greater_than <- which(abs(correlations) >= 0.90, arr.ind = TRUE)
+
+# Remove duplicate relationships due to symmetric matrix
+# Also remove diagonal elements which are always 1
+greater_than <- greater_than[greater_than[,"row"] < greater_than[,"col"], ]
+
+# Replace indices with actual column names
+greater_than[,"row"] <- colnames(heart_failure_complete)[greater_than[,"row"]]
+greater_than[,"col"] <- colnames(heart_failure_complete)[as.numeric(greater_than[,"col"])]
+
+# Remove names for ease of interpretation
+unnamed_greater_than <- unname(greater_than)
+
+# View the results
+unnamed_greater_than
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+
+The output [ ,1] [,2] from unnamed_greater_than suggests that no pairs of variables were found that met the condition of having a correlation greater than or equal to 0.90. This means that, based on the threshold set, there is likely no problematic multicollinearity between any of the variables in the dataset. This is a positive indication for subsequent modeling, as it suggests that each variable contributes some unique information that could be valuable in a predictive model for heart failure outcomes.
+
+## Scale variables 
+
+Scaling the variables before performing PCA is crucial as it ensures that each variable contributes equally to the analysis. By standardizing variables (centering around the mean and dividing by the standard deviation), we transform the data into a uniform scale where the variance reflects the relative importance of each variable, allowing PCA to capture the underlying structure effectively.
+```{r}
+# Perform PCA
+heart_failure_pca <- prcomp(heart_failure_complete, center = TRUE, scale. = TRUE)
+
+# Obtain summary
+summary(heart_failure_pca)
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+Standard Deviation: The values here represent the square roots of the eigenvalues of the correlation/covariance matrix. They indicate the amount of variance captured by each principal component. For instance, PC1 has the highest standard deviation, capturing the most variance.
+Proportion of Variance: This column provides the percentage of the dataset's total variance that each principal component accounts for. PC1 accounts for 15.62% of the variance, which is the highest among all components, indicating it contains the most 'information' about the original dataset.
+Cumulative Proportion: This indicates the total variance captured by the first 'n' components. For example, by the time we include up to PC3, we've captured approximately 38.49% of the total variance in the dataset.
+
+
+
+## Visualize Data 
+
+In the context of our assignment, we utilize the fviz_pca_var function to graphically depict the contributions of various clinical variables to the principal components derived from PCA. This visualization enables us to quickly discern which factors are most influential in the multidimensional variance of heart failure data, thereby facilitating a more targeted approach to modeling and interpretation. 
+```{r}
+library(factoextra)
+
+# Produce a 2-dimensional plot of the PCA results
+fviz_pca_var(
+    heart_failure_pca,
+    col.var = "contrib", # Color by contributions to the PCA
+    gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+    repel = TRUE # Avoid overlapping text if possible
+)
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+Axes: The horizontal axis (Dim1) and vertical axis (Dim2) represent the first and second principal components, respectively. These components are linear combinations of the original variables that capture the maximum variance in the dataset. Dim1 accounts for 15.6% of the variance, while Dim2 accounts for 12.8%.
+Vectors: Each arrow represents a variable from the dataset, with the direction and length of the arrow indicating how each variable contributes to the two principal components. The length of the arrow is proportional to the strength of the variable's contribution to the variance in the dataset, and the direction indicates the relationship between the variable and each principal component.
+Variable Contribution: Variables further from the origin (like "time") contribute more to the variance captured by the principal components than those closer to the origin (like "DEATH_EVENT"). Variables that point in similar directions are positively correlated, while those at right angles are not linearly correlated.
+Correlations: For instance, "time" has a strong negative contribution to Dim1, indicating that as "time" increases, the scores on Dim1 decrease. Variables like "serum_creatinine" and "serum_sodium" seem to have a moderate positive correlation with each other since their vectors point in a similar direction.
+Variable Clustering: Variables that cluster together are likely to have similar profiles across the observations. For example, "anaemia" and "diabetes" appear to be moderately correlated, as their vectors point in roughly the same direction.
+Contrib Color: The color intensity on the arrows represents the contribution of each variable to the principal components, with warmer colors (red, orange) indicating a higher contribution and cooler colors (blue, green) indicating a lower contribution.
+Important Variables: The variable "time" seems to be an outlier in terms of its contribution to the principal components, suggesting it has a unique profile compared to the other clinical variables in the context of heart failure.
+
+## Visualize Data continued 
+
+In our heart failure clinical data analysis, the fviz_pca_ind visualization serves a dual purpose: it allows us to observe the spread and clustering of individual patient data across the principal components, providing a visual assessment of how well each patient is represented by the key patterns identified in the PCA.
+```{r}
+# Produce a 2-dimensional plot of the PCA individuals
+fviz_pca_ind(
+    heart_failure_pca,
+    col.ind = "cos2", # Color individuals by their quality of representation
+    gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+    repel = FALSE # Set to true if you want to avoid overlapping labels
+)
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+Axes: The plot has two axes, Dim1 and Dim2, representing the first and second principal components, respectively. These components are the result of the PCA aiming to capture the maximum variance within the dataset. Dim1 accounts for 15.6% of the variance, while Dim2 accounts for 12.8%.
+Data Points: Each point represents an individual patient record in the dataset. The position of a point is determined by the patient's scores on the principal components.
+Cos2 Color Coding: The color intensity of the points reflects the cos2 value, which indicates the quality of the representation of each data point in the PCA space. Points with higher cos2 values (warmer colors like red and orange) are well-represented by the two displayed components, whereas points with lower cos2 values (cooler colors like blue and green) are less represented, suggesting other components may better capture their variance.
+Distribution: The spread of the points across the plot indicates the diversity in the dataset. Clusters of points may suggest groups of patients with similar characteristics, while outliers could represent unique cases.
+
+
+
+## Visualize Data continued 
+
+This R script creates a biplot from our PCA results, offering a simultaneous representation of the heart failure dataset's variables and individuals. The biplot is particularly insightful, as it juxtaposes the contribution of variables to the principal components (displayed as vectors) against the backdrop of individual patient data points. By employing the repel feature, we ensure clear visibility of variable names, avoiding overlap. Variables are highlighted in red tones, while individual data points are marked in teal, enhancing the distinction between them. Displaying only variable labels helps maintain focus on interpreting the variables' influence on the component axes. 
+```{r}
+# Create a biplot
+fviz_pca_biplot(
+    heart_failure_pca,
+    repel = TRUE, # Avoid label overlapping
+    col.var = "#FC4E07", # Color for variables
+    col.ind = "#00AFBB", # Color for individuals
+    label = "var" # Show labels for variables only
+)
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+The biplot provided offers a graphical synthesis of the heart failure dataset through Principal Component Analysis (PCA). By plotting the first two principal components, which explain 15.6% and 12.8% of the variance respectively, we gain valuable insights into the data's structure. The vectors represent clinical variables, with their orientation and length indicating the direction and magnitude of their influence on the components. Notably, "time" and "serum_sodium" exert a significant influence on the first principal component. This visualization allows us to observe how individual patients' data align with the principal components, elucidating the interplay between different clinical measurements and their combined effect on patient outcomes. 
+## Barlett's Test
+
+Bartlett's test is being conducted to assess the appropriateness of performing Principal Component Analysis on our heart failure clinical dataset by testing the hypothesis that the variables are uncorrelated. The significant chi-square statistic from the test indicates that the variables have sufficient correlation, thus validating the use of PCA to uncover underlying structures in the data.
+```{r}
+# Perform Bartlett's test
+cortest.bartlett(heart_failure_complete)
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+Given the extremely small p-value, we reject the null hypothesis, concluding that the correlation matrix is significantly different from an identity matrix. This result suggests that there is a significant relationship among the variables, and thus, PCA is likely to be a suitable method for the dataset. The chi-square statistic gives us confidence that the variables are correlated to some extent, which means that PCA could reveal underlying patterns or components in the data.
+
+
+## Kaiser-Meyer-Olkin(KMO)
+
+The Kaiser-Meyer-Olkin (KMO) Measure of Sampling Adequacy is a statistic used to assess the appropriateness of conducting a factor analysis or Principal Component Analysis (PCA) on a dataset. 
+```{r}
+#KMO
+KMO(heart_failure_complete)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+The overall MSA for the dataset is 0.57. The KMO values range from 0 to 1, with higher values indicating that the data is more suitable for factor analysis. A value of 0.57 is considered mediocre. It suggests that the dataset could be used for factor analysis, but the results might not be as reliable as if the KMO were higher (preferably above 0.6 or 0.7)
+
+
+## Determine the Number of Components 
+
+We employ PCA with oblimin rotation to determine the optimal number of components, using a scree plot of eigenvalues to identify the point at which additional factors no longer contribute significantly to explaining the variance in our heart failure clinical data.
+```{r}
+# Perform PCA using the 'psych' package
+initial_pca <- principal(heart_failure_complete, nfactors = ncol(heart_failure_complete), rotate = "oblimin")
+
+# Plotting the eigenvalues
+plot(initial_pca$values, type = "b", ylab = "Eigenvalues")
+abline(h = 1)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+The "elbow" of the scree plot occurring at the sixth index suggests that the first six principal components capture the majority of the variance in the heart failure dataset, indicating that additional components beyond this point contribute minimally and may not be necessary for our analysis.
+
+
+## Parallel Analysis Scree Plots 
+
+We perform a parallel analysis using the 'psych' package to objectively determine the number of principal components to retain by comparing the eigenvalues from our data with those from random data of similar structure.
+```{r}
+
+# Perform parallel analysis using the 'psych' package
+parallel_pca <- fa.parallel(
+  x = heart_failure_complete, 
+  fa = "pc",
+  sim = FALSE # Set to FALSE to ensure resampling is not done
+)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+The parallel analysis suggests retaining six components, as indicated by the intersection of our dataset's eigenvalues with those of a random dataset at the sixth component. This convergence implies that the first six components contain more information than would be expected by chance, confirming that they likely represent meaningful underlying structures in the heart failure clinical data.
+
+## Principal Component Analysis with Six Factors
+
+Leveraging the 'psych' package, we perform a Principal Component Analysis (PCA) specifying six factors, based on insights from both the scree plot and parallel analysis. By choosing an oblimin rotation, we acknowledge and allow for potential correlations between the components, aiming to gain a more interpretable and nuanced understanding of the heart failure dataset's underlying structure.
+```{r}
+# Perform PCA with 6 factors using the 'psych' package
+final_pca <- principal(
+  r = heart_failure_complete, 
+  nfactors = 6,
+  rotate = "oblimin", # Correlated dimensions
+  residuals = TRUE # Obtain residuals
+)
+
+# View the results
+print(final_pca)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+
+## Check Residuals - Shapiro-Wilk normality test
+```{r}
+#Shapiro-Wilk
+shapiro.test(final_pca$residual)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+The Shapiro-Wilk normality test applied to the residuals of our PCA model yields a statistic of W = 0.92754, indicating a slight deviation from normality. The highly significant p-value of 1.724e-07 strongly suggests that the residuals are not normally distributed, which could imply non-linearity or other complexities in the underlying structure of the heart failure data.
+
+## Histogram 
+```{r}
+# Histogram
+hist(final_pca$residual)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+
+## Compute Scores 
+
+In our analysis, we refine the PCA results by extracting and formatting the factor loadings for the first six principal components, rounding them to three decimal places for precision. This process emphasizes the most impactful relationships by omitting loadings with absolute values below 0.30, thereby streamlining the interpretation of each variable's contribution to the principal components within the heart failure clinical dataset.
+
+```{r}
+# Extract and format loadings for all six factors
+loadings <- round(final_pca$loadings[, 1:6], 3)
+loadings[abs(loadings) < 0.30] <- ""
+
+# Print formatted loadings
+print(loadings)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+
+Age, Serum Creatinine: "Degenerative" - This dimension may be reflecting aspects related to aging and renal function deterioration, common in progressive health conditions.
+Sex: "Biological" - This dimension is straightforwardly indicative of biological differences, possibly reflecting gender-based physiological variations.
+Serum Sodium, Ejection Fraction, Diabetes: "Metabolic" - These variables suggest a dimension related to metabolic processes and cardiovascular efficiency, which are critical in heart failure conditions.
+Creatinine Phosphokinase, Platelets: "Muscular" - This dimension might be reflecting muscle health and blood clotting processes, possibly indicating tissue damage and healing responses.
+Anaemia, High Blood Pressure: "Circulatory" - These variables are key indicators of blood health and circulatory system function, crucial in the context of heart failure.
+Ejection Fraction, Platelets, Serum Creatinine: "Cardiorenal" - This dimension seems to combine aspects of cardiac function and kidney health, both of which are interrelated in heart failure pathology.
+
+
+## Renaming and Analyzing PCA Component Scores
+
+After obtaining the scores from our six-factor PCA model, we assign meaningful labels to each principal component — "Degenerative," "Biological," "Metabolic," "Muscular," "Circulatory," and "Cardiorenal" — to reflect their potential clinical relevance in the heart failure dataset. By renaming these components and examining the initial rows of the PCA scores, we gain immediate insights into how each patient's clinical profile aligns with these newly defined, interpretable dimensions.
+
+```{r}
+# Obtain PCA scores
+pca_scores <- final_pca$scores
+
+# Rename the columns of the PCA scores
+colnames(pca_scores) <- c("Degenerative", "Biological", "Metabolic", "Muscular", "Circulatory", "Cardiorenal")
+
+# View the first few rows of the PCA scores with new names
+head(pca_scores)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+
+## Use Scores to Predict 
+
+In this step, we utilize the tidyverse package for data manipulation and set a random seed to ensure reproducibility in our analysis of the heart failure dataset. We then examine the distribution of the 'DEATH_EVENT' variable, a key outcome in our dataset, by creating a frequency table to understand the balance or imbalance between the event occurrences and non-occurrences.
+```{r}
+
+# Load necessary library
+library(tidyverse)
+
+# Set seed for reproducibility
+set.seed(1234)
+
+# Check the distribution of the categories
+table(heart_failure_data$DEATH_EVENT)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+The frequency table for the 'DEATH_EVENT' variable in the heart failure dataset shows that there are 203 occurrences of the event being categorized as '0' (indicating no death event) and 96 occurrences of it being categorized as '1' (indicating a death event). This imbalance highlights a higher frequency of survival over mortality in the dataset.
+
+## Balance Dataset
+
+```{r}
+# Calculate the number of observations in the smaller category
+num_smaller_category <- min(table(heart_failure_data$DEATH_EVENT))
+
+# Balance the dataset
+scores_balanced <- heart_failure_data %>%
+  group_by(DEATH_EVENT) %>%
+  sample_n(size = num_smaller_category) %>%
+  ungroup()
+
+# Check the distribution of the categories in the balanced dataset
+table(scores_balanced$DEATH_EVENT)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+
+
+## Logistic Regression Analysis for Predicting Heart Failure Outcomes
+
+In this segment of the analysis, we construct a logistic regression model using the lrm function, purposefully excluding 'serum_sodium' to assess the impact of other clinical variables like age, anaemia, and diabetes on the 'DEATH_EVENT' outcome in heart failure patients.
+
+```{r}
+options(repos = structure(c(CRAN = "https://cloud.r-project.org/"))) 
+
+install.packages("rms")
+
+# Load rms package 
+library(rms)
+
+# Create index for 80% in train, 20% in test
+train_index <- sample(1:nrow(scores_balanced), size = 0.8*nrow(scores_balanced))
+test_index <- setdiff(1:nrow(scores_balanced), train_index) 
+
+# Now lrm() should work
+heart_failure_lrm <- lrm(
+  DEATH_EVENT ~ age + anaemia + creatinine_phosphokinase + diabetes + 
+    ejection_fraction + high_blood_pressure + platelets + 
+    serum_creatinine + sex + smoking + time,
+  data = scores_balanced[train_index,]
+)
+
+# Create a datadist object from your data
+dd <- datadist(scores_balanced)
+
+# Assign it to options
+options(datadist='dd')
+
+# Now run the summary of your logistic regression model
+summary(heart_failure_lrm)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+The logistic regression output indicates the influence of various factors on the likelihood of death events in heart failure patients, with notable findings such as the significant negative effect of 'time' on death events (odds ratio 0.043), and 'age' showing increased risk (odds ratio 1.91) as age increases from 53 to 70 years.
+
+
+## Odds ratio 
+
+In our logistic regression analysis, we compute the odds ratios from the model's coefficients to quantitatively assess the impact of each clinical factor, such as 'Degenerative', 'Biological', and others, on the likelihood of a death event in heart failure patients, thereby offering a more tangible interpretation of the model's results.
+```{r}
+# Calculate the odds ratios from the logistic regression model coefficients
+odds_ratios <- exp(coef(heart_failure_lrm))
+
+# Create a named vector for the odds ratios using the provided descriptors
+named_odds_ratios <- setNames(odds_ratios, c("Intercept", "Degenerative", "Biological", 
+                                             "Metabolic", "Muscular", "Circulatory", 
+                                             "Cardiorenal"))
+
+# Print the named odds ratios
+print(named_odds_ratios)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+The odds ratio output from the logistic regression model reveals that factors like 'Degenerative' and 'Biological' slightly increase the odds of a death event (with ratios of 1.039 and 1.139, respectively), while 'Sex' markedly decreases it (odds ratio of 0.260), indicating varying degrees of influence of these clinical variables on patient outcomes in heart failure.
+
+
+## Logistic Regression Model for Predicting Death Events in Heart Failure
+
+In our analysis, we develop a logistic regression model to predict the probability of death events in heart failure patients, utilizing a comprehensive set of clinical variables. The effectiveness of this model is assessed through the generation of confusion matrices for both training and test sets, allowing us to critically evaluate the model's predictive accuracy and reliability in differentiating between patient outcomes.
+```{r}
+
+# Load caret
+library(caret)
+
+# Fit the logistic regression model
+heart_failure_logm <- glm(
+  DEATH_EVENT ~ ., 
+  data = scores_balanced[train_index, -5], # Adjust the '-5' if needed
+  family = "binomial"
+)
+
+# Make predictions on the training set
+predicted_train <- factor(ifelse(predict(heart_failure_logm, type = "response") > 0.50, 1, 0))
+
+# Make predictions on the test set
+predicted_test <- factor(ifelse(predict(
+  heart_failure_logm,
+  newdata = scores_balanced[test_index,], 
+  type = "response"
+) > 0.50, 1, 0))
+
+# Generate confusion matrix
+confusion_matrix <- confusionMatrix(data = predicted_train, 
+                                    reference = factor(scores_balanced$DEATH_EVENT[train_index]),
+                                    positive = "1")
+
+# Print the confusion matrix
+print(confusion_matrix)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+The confusion matrix for our logistic regression model shows an accuracy of 77.61%, with a sensitivity of 81.69% in correctly predicting death events (positive class) and a specificity of 73.02% in correctly identifying no death events. The model demonstrates a balanced accuracy of 77.35%, indicating its effectiveness in distinguishing between patient outcomes in the context of heart failure, with its predictive performance significantly better than the no-information rate (p-value: 3.213e-09)
+
+
+
+## Validation of Logistic Regression Model on Test Set
+
+In this part of the analysis, we verify the alignment of our logistic regression model's predictions with the actual test data, followed by computing a confusion matrix. This step is crucial for assessing the model's predictive accuracy and reliability in the context of heart failure outcomes.
+
+```{r}
+# Check if 'valueCategory' exists in 'scores_balanced'
+if (!"valueCategory" %in% colnames(scores_balanced)) {
+    if ("DEATH_EVENT" %in% colnames(scores_balanced)) {
+        reference_test <- factor(scores_balanced$DEATH_EVENT[test_index], levels = c("0", "1"))
+    } else {
+        stop("The outcome variable (valueCategory or DEATH_EVENT) is missing in the dataset.")
+    }
+} else {
+    # If 'valueCategory' exists, use it as the reference
+    reference_test <- factor(scores_balanced$valueCategory[test_index], levels = c("0", "1"))
+}
+# Now, check the lengths again
+length_predicted_test <- length(predicted_test)
+length_reference_test <- length(reference_test)
+
+# Print the lengths for comparison
+print(paste("Length of predicted_test:", length_predicted_test))
+print(paste("Length of reference_test:", length_reference_test))
+
+# Ensure the lengths are the same and then proceed to generate the confusion matrix
+if (length_predicted_test == length_reference_test) {
+    confusion_matrix_test <- confusionMatrix(data = predicted_test, 
+                                             reference = reference_test,
+                                             positive = "1")
+    print(confusion_matrix_test)
+} else {
+    stop("The lengths of predicted and reference data do not match.")
+}
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+
+```
+The confusion matrix for the test set reveals an accuracy of 70.69% in predicting death events, with a sensitivity of 68.00% in correctly identifying positive cases and a specificity of 72.73% for negatives. The balanced accuracy of 70.36% and a kappa statistic of 0.4053 indicate a moderate level of agreement between the predicted and actual values, affirming the model's reasonable predictive performance in the context of heart failure outcomes.
+
+
+## Network Analysis of Heart Failure Dataset Using Glasso and qgraph
+
+In our analysis, we utilize the 'glasso' method to explore complex relationships within the heart failure dataset, creating a network visualization with 'qgraph' to effectively illustrate the interdependencies among clinical variables.
+
+```{r}
+# Install and load the glasso package
+if (!require(glasso)) install.packages("glasso")
+library(glasso)
+
+# Install and load the qgraph package for visualization
+if (!require(qgraph)) install.packages("qgraph")
+library(qgraph)
+
+# First, calculate the empirical covariance matrix
+cov_matrix <- cov(heart_failure_complete)
+
+# Apply the glasso function
+glasso_result <- glasso::glasso(cov_matrix, rho = 0.01) # Adjust rho as needed
+
+# Visualize the network
+network_plot <- qgraph::qgraph(glasso_result$wi, layout = "spring")
+print(network_plot)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+The network graph depicts the interconnectedness of variables in the heart failure dataset, where nodes represent variables and edges indicate the strength and direction of their relationships, with thicker lines suggesting stronger correlations.
+
+
+## Community Detection in Clinical Variable Network
+
+We apply the walktrap algorithm on our network graph to identify communities of closely related clinical variables, enhancing our understanding of the data's structure for subsequent analysis.
+```{r}
+# Load necessary library
+if (!require(igraph)) install.packages("igraph")
+library(igraph)
+
+# Convert the adjacency matrix to an igraph object
+network_igraph <- graph_from_adjacency_matrix(glasso_result$wi, mode = "undirected", diag = FALSE)
+
+# Perform community detection using the walktrap algorithm
+heart_communities <- walktrap.community(network_igraph)
+
+# Print the communities
+print(heart_communities)
+
+plot(heart_communities, network_igraph)
+
+#I have used ChatGPT  to aid the production of the code used in this problem.
+```
+
+The output indicates that the walktrap community detection algorithm, as implemented in the 'igraph' package, has identified 13 distinct communities within the network graph of the heart failure data. Each group likely contains variables that are more closely related to each other than to variables in different groups The modularity score, used to measure the strength of the division of a network into communities, is not available (NaN), which usually suggests that the calculation may not have been applicable. 
+
+The network graph visualizes distinct communities within the heart failure dataset, with each colored circle representing a cluster of related clinical variables, indicating varying patterns of association.
+
+## Summary
+In summary, this comprehensive analysis utilized a multifaceted approach combining dimension reduction, predictive modeling, and network analysis techniques to uncover insights into the intricate relationships between clinical factors and their effects on heart failure outcomes.
+Principal component analysis effectively distilled key underlying structures within the complex dataset, identifying components related to biological attributes, degenerative conditions, metabolism, circulation, and cardiorenal interactions. A logistic regression model demonstrated reasonable predictive accuracy in distinguishing between survival and mortality events based on this wide array of clinical inputs.
+Further examination through graphical lasso and community detection algorithms revealed connections and clusters among related variables, offering a novel perspective on the interconnectivity of different physiological processes in heart failure patients.
+While additional refinements could likely improve predictive performance and extract further subtleties, the insights gained already significantly advance our understanding of heart failure’s clinical landscape. This multidimensional analysis highlights the importance of utilizing diverse statistical approaches to dissect the heterogeneous and multifactorial nature of this complex syndrome.
+The findings contribute to more targeted prognosis and management strategies in heart failure care and research by pinpointing key interdependencies between influential clinical markers and outcomes. Future work can build on these results to construct even more detailed, personalized models for patient risk-stratification and decision support.
+
+
+
+I have used ChatGPT  to aid the production and the analysis of this assignment 
+
+
+
+
+
